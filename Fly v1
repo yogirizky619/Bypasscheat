@@ -1,0 +1,585 @@
+-- main.lua
+
+--[[ 
+📦 Script Terbang Gabungan - UI Minimal + Kontrol Analog + Sistem Fly Klasik
+- UI minimal dari script pertama (tombol minimal, posisi tidak menghalangi)
+- Sistem fly dari script kedua (TranslateBy method + BodyGyro/BodyVelocity)
+- Kontrol UP/DOWN tetap ada untuk naik/turun
+- Speed control yang berfungsi
+- Body light/senter
+- Menu dipindah ke kanan + minimize function
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+-- Tunggu karakter
+local function getCharacter()
+    local char = player.Character
+    if not char then
+        player.CharacterAdded:Wait()
+        char = player.Character
+    end
+    return char
+end
+
+local char = getCharacter()
+local hrp = char:WaitForChild("HumanoidRootPart")
+local humanoid = char:WaitForChild("Humanoid")
+
+-- Buat GUI dengan style dari script pertama
+local gui = Instance.new("ScreenGui")
+gui.Name = "FlyMinimalUI"
+gui.Parent = player:WaitForChild("PlayerGui")
+gui.ResetOnSpawn = false
+
+-- Main frame untuk grouping semua tombol
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 200, 0, 270)
+mainFrame.Position = UDim2.new(1, -210, 0, 10) -- Posisi di kanan
+mainFrame.BackgroundTransparency = 1
+mainFrame.Parent = gui
+
+-- Minimize frame (hanya toggle dan minimize/close)
+local minimizeFrame = Instance.new("Frame")
+minimizeFrame.Name = "MinimizeFrame"
+minimizeFrame.Size = UDim2.new(0, 200, 0, 50)
+minimizeFrame.Position = UDim2.new(1, -210, 0, 10) -- Posisi di kanan
+minimizeFrame.BackgroundTransparency = 1
+minimizeFrame.Parent = gui
+minimizeFrame.Visible = false
+
+-- Fungsi untuk membuat tombol dengan gradient hijau
+local function createBtn(name, pos, text, size, parent)
+	parent = parent or mainFrame
+	size = size or UDim2.new(0, 60, 0, 60)
+	local btn = Instance.new("TextButton", parent)
+	btn.Name = name
+	btn.Size = size
+	btn.Position = pos
+	btn.BackgroundTransparency = 0.15
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.Text = text
+	btn.TextScaled = true
+	btn.Font = Enum.Font.GothamBold
+	btn.TextStrokeTransparency = 0.5
+	btn.TextStrokeColor3 = Color3.new(0, 0, 0)
+	
+	local corner = Instance.new("UICorner", btn)
+	corner.CornerRadius = UDim.new(0, 12)
+	
+	local gradient = Instance.new("UIGradient", btn)
+	gradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0.0, Color3.fromRGB(46, 204, 113)),
+		ColorSequenceKeypoint.new(1.0, Color3.fromRGB(22, 160, 133))
+	}
+	gradient.Rotation = 45
+	
+	local stroke = Instance.new("UIStroke", btn)
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Thickness = 1
+	stroke.Transparency = 0.7
+	
+	return btn
+end
+
+-- Buat tombol-tombol di main frame
+local btns = {
+	Toggle = createBtn("Toggle", UDim2.new(0, 10, 0, 0), "Fly OFF", UDim2.new(0, 100, 0, 40)),
+	Minimize = createBtn("Minimize", UDim2.new(0, 120, 0, 0), "_", UDim2.new(0, 35, 0, 40)),
+	Close = createBtn("Close", UDim2.new(0, 165, 0, 0), "X", UDim2.new(0, 35, 0, 40)),
+	
+	Up = createBtn("Up", UDim2.new(0, 10, 0, 50), "UP", UDim2.new(0, 60, 0, 35)),
+	Down = createBtn("Down", UDim2.new(0, 80, 0, 50), "DOWN", UDim2.new(0, 60, 0, 35)),
+	
+	SpeedUp = createBtn("SpeedUp", UDim2.new(0, 10, 0, 95), "+", UDim2.new(0, 35, 0, 35)),
+	SpeedDown = createBtn("SpeedDown", UDim2.new(0, 55, 0, 95), "-", UDim2.new(0, 35, 0, 35)),
+	
+	LightUp = createBtn("LightUp", UDim2.new(0, 10, 0, 140), "+", UDim2.new(0, 35, 0, 35)),
+	LightDown = createBtn("LightDown", UDim2.new(0, 55, 0, 140), "-", UDim2.new(0, 35, 0, 35))
+}
+
+-- Tombol di minimize frame
+local minimizeBtns = {
+	ToggleMin = createBtn("ToggleMin", UDim2.new(0, 10, 0, 0), "Fly OFF", UDim2.new(0, 100, 0, 40), minimizeFrame),
+	Maximize = createBtn("Maximize", UDim2.new(0, 120, 0, 0), "+", UDim2.new(0, 35, 0, 40), minimizeFrame),
+	CloseMin = createBtn("CloseMin", UDim2.new(0, 165, 0, 0), "X", UDim2.new(0, 35, 0, 40), minimizeFrame)
+}
+
+-- Labels di main frame
+local speedLabel = Instance.new("TextLabel", mainFrame)
+speedLabel.Size = UDim2.new(0, 80, 0, 20)
+speedLabel.Position = UDim2.new(0, 100, 0, 102)
+speedLabel.BackgroundTransparency = 1
+speedLabel.TextColor3 = Color3.new(1, 1, 1)
+speedLabel.TextScaled = true
+speedLabel.Font = Enum.Font.GothamBold
+speedLabel.TextStrokeTransparency = 0.5
+speedLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+speedLabel.Text = "Speed: 1"
+
+local lightLabel = Instance.new("TextLabel", mainFrame)
+lightLabel.Size = UDim2.new(0, 80, 0, 20)
+lightLabel.Position = UDim2.new(0, 100, 0, 147)
+lightLabel.BackgroundTransparency = 1
+lightLabel.TextColor3 = Color3.new(1, 1, 1)
+lightLabel.TextScaled = true
+lightLabel.Font = Enum.Font.GothamBold
+lightLabel.TextStrokeTransparency = 0.5
+lightLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+lightLabel.Text = "Light: 0"
+
+local instructLabel = Instance.new("TextLabel", mainFrame)
+instructLabel.Size = UDim2.new(0, 190, 0, 80)
+instructLabel.Position = UDim2.new(0, 5, 0, 185)
+instructLabel.BackgroundTransparency = 1
+instructLabel.TextColor3 = Color3.new(1, 1, 1)
+instructLabel.TextScaled = true
+instructLabel.Font = Enum.Font.Gotham
+instructLabel.TextStrokeTransparency = 0.5
+instructLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+instructLabel.Text = "Control: Use analog to move forward/back/left/right\nUP/DOWN buttons for vertical movement"
+
+-- Variables dari script kedua
+local speeds = 1
+local lightBrightness = 0
+local nowe = false
+local tpwalking = false
+local connections = {}
+
+-- Fungsi minimize/maximize
+local function minimizeGUI()
+	mainFrame.Visible = false
+	minimizeFrame.Visible = true
+end
+
+local function maximizeGUI()
+	mainFrame.Visible = true
+	minimizeFrame.Visible = false
+end
+
+-- Body light function
+local function updateBodyLight()
+	for _, child in pairs(hrp:GetChildren()) do
+		if child.Name == "FlashlightGlow" or 
+		   child.Name == "FlashlightParticles" or 
+		   child.Name == "FlashlightSpot" then
+			child:Destroy()
+		end
+	end
+	
+	for _, child in pairs(hrp:GetChildren()) do
+		if child:IsA("Attachment") and child.Name == "FlashlightParticles" then
+			child:Destroy()
+		end
+	end
+	
+	if lightBrightness > 0 then
+		local glowEffect = Instance.new("PointLight", hrp)
+		glowEffect.Name = "FlashlightGlow"
+		glowEffect.Brightness = lightBrightness * 0.8
+		glowEffect.Range = lightBrightness * 12
+		glowEffect.Color = Color3.fromRGB(255, 248, 220)
+		glowEffect.Shadows = true
+		
+		local spotLight = Instance.new("SpotLight", hrp)
+		spotLight.Name = "FlashlightSpot"
+		spotLight.Brightness = lightBrightness * 0.6
+		spotLight.Range = lightBrightness * 15
+		spotLight.Angle = 60 + (lightBrightness * 5)
+		spotLight.Color = Color3.fromRGB(255, 248, 220)
+		spotLight.Face = Enum.NormalId.Front
+		spotLight.Shadows = true
+		
+		local attachment = Instance.new("Attachment", hrp)
+		attachment.Name = "FlashlightParticles"
+		local particles = Instance.new("ParticleEmitter", attachment)
+		particles.Color = ColorSequence.new(Color3.fromRGB(255, 248, 220))
+		particles.Size = NumberSequence.new{
+			NumberSequenceKeypoint.new(0, 0.3),
+			NumberSequenceKeypoint.new(1, 0.1)
+		}
+		particles.Lifetime = NumberRange.new(0.8, 1.5)
+		particles.Rate = lightBrightness * 5
+		particles.SpreadAngle = Vector2.new(30, 30)
+		particles.Speed = NumberRange.new(1, 3)
+		particles.Transparency = NumberSequence.new{
+			NumberSequenceKeypoint.new(0, 0.7),
+			NumberSequenceKeypoint.new(1, 1)
+		}
+		particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	end
+	
+	lightLabel.Text = "Light: " .. lightBrightness
+end
+
+-- Fungsi fly utama dari script kedua (dimodifikasi)
+local function toggleFly()
+	if nowe == true then
+		-- Turn OFF fly
+		nowe = false
+		
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Flying,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Landed,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Running,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.RunningNoPhysics,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.StrafingNoPhysics,true)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming,true)
+		humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+		
+		tpwalking = false
+		player.Character.Animate.Disabled = false
+		humanoid.PlatformStand = false
+		
+	else 
+		-- Turn ON fly
+		nowe = true
+		
+		-- Start tpwalking untuk horizontal movement
+		for i = 1, speeds do
+			spawn(function()
+				local hb = RunService.Heartbeat	
+				tpwalking = true
+				local chr = player.Character
+				local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+				while tpwalking and hb:Wait() and chr and hum and hum.Parent do
+					if hum.MoveDirection.Magnitude > 0 then
+						chr:TranslateBy(hum.MoveDirection)
+					end
+				end
+			end)
+		end
+		
+		player.Character.Animate.Disabled = true
+		local Char = player.Character
+		local Hum = Char:FindFirstChildOfClass("Humanoid") or Char:FindFirstChildOfClass("AnimationController")
+
+		for i,v in next, Hum:GetPlayingAnimationTracks() do
+			v:AdjustSpeed(0)
+		end
+		
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Flying,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Landed,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Running,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.RunningNoPhysics,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.StrafingNoPhysics,false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming,false)
+		humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+	end
+
+	-- Sistem BodyGyro + BodyVelocity dari script kedua untuk kontrol yang halus
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then
+		local torso = char.Torso
+		local ctrl = {f = 0, b = 0, l = 0, r = 0}
+		local lastctrl = {f = 0, b = 0, l = 0, r = 0}
+		local maxspeed = 50
+		local speed = 0
+
+		local bg = Instance.new("BodyGyro", torso)
+		bg.P = 9e4
+		bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+		bg.cframe = torso.CFrame
+		local bv = Instance.new("BodyVelocity", torso)
+		bv.velocity = Vector3.new(0,0.1,0)
+		bv.maxForce = Vector3.new(9e9, 9e9, 9e9)
+		
+		if nowe == true then
+			humanoid.PlatformStand = true
+		end
+		
+		spawn(function()
+			while nowe == true or humanoid.Health == 0 do
+				RunService.RenderStepped:Wait()
+
+				if ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0 then
+					speed = speed+.5+(speed/maxspeed)
+					if speed > maxspeed then
+						speed = maxspeed
+					end
+				elseif not (ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0) and speed ~= 0 then
+					speed = speed-1
+					if speed < 0 then
+						speed = 0
+					end
+				end
+				if (ctrl.l + ctrl.r) ~= 0 or (ctrl.f + ctrl.b) ~= 0 then
+					bv.velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (ctrl.f+ctrl.b)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(ctrl.l+ctrl.r,(ctrl.f+ctrl.b)*.2,0).p) - workspace.CurrentCamera.CoordinateFrame.p))*speed
+					lastctrl = {f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r}
+				elseif (ctrl.l + ctrl.r) == 0 and (ctrl.f + ctrl.b) == 0 and speed ~= 0 then
+					bv.velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (lastctrl.f+lastctrl.b)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(lastctrl.l+lastctrl.r,(lastctrl.f+lastctrl.b)*.2,0).p) - workspace.CurrentCamera.CoordinateFrame.p))*speed
+				else
+					bv.velocity = Vector3.new(0,0,0)
+				end
+				bg.cframe = workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(-math.rad((ctrl.f+ctrl.b)*50*speed/maxspeed),0,0)
+			end
+			ctrl = {f = 0, b = 0, l = 0, r = 0}
+			lastctrl = {f = 0, b = 0, l = 0, r = 0}
+			speed = 0
+			bg:Destroy()
+			bv:Destroy()
+			humanoid.PlatformStand = false
+			player.Character.Animate.Disabled = false
+			tpwalking = false
+		end)
+		
+	else
+		-- R15 version
+		local UpperTorso = char.UpperTorso
+		local ctrl = {f = 0, b = 0, l = 0, r = 0}
+		local lastctrl = {f = 0, b = 0, l = 0, r = 0}
+		local maxspeed = 50
+		local speed = 0
+
+		local bg = Instance.new("BodyGyro", UpperTorso)
+		bg.P = 9e4
+		bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+		bg.cframe = UpperTorso.CFrame
+		local bv = Instance.new("BodyVelocity", UpperTorso)
+		bv.velocity = Vector3.new(0,0.1,0)
+		bv.maxForce = Vector3.new(9e9, 9e9, 9e9)
+		
+		if nowe == true then
+			humanoid.PlatformStand = true
+		end
+		
+		spawn(function()
+			while nowe == true or humanoid.Health == 0 do
+				wait()
+
+				if ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0 then
+					speed = speed+.5+(speed/maxspeed)
+					if speed > maxspeed then
+						speed = maxspeed
+					end
+				elseif not (ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0) and speed ~= 0 then
+					speed = speed-1
+					if speed < 0 then
+						speed = 0
+					end
+				end
+				if (ctrl.l + ctrl.r) ~= 0 or (ctrl.f + ctrl.b) ~= 0 then
+					bv.velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (ctrl.f+ctrl.b)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(ctrl.l+ctrl.r,(ctrl.f+ctrl.b)*.2,0).p) - workspace.CurrentCamera.CoordinateFrame.p))*speed
+					lastctrl = {f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r}
+				elseif (ctrl.l + ctrl.r) == 0 and (ctrl.f + ctrl.b) == 0 and speed ~= 0 then
+					bv.velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (lastctrl.f+lastctrl.b)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(lastctrl.l+lastctrl.r,(lastctrl.f+lastctrl.b)*.2,0).p) - workspace.CurrentCamera.CoordinateFrame.p))*speed
+				else
+					bv.velocity = Vector3.new(0,0,0)
+				end
+
+				bg.cframe = workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(-math.rad((ctrl.f+ctrl.b)*50*speed/maxspeed),0,0)
+			end
+			ctrl = {f = 0, b = 0, l = 0, r = 0}
+			lastctrl = {f = 0, b = 0, l = 0, r = 0}
+			speed = 0
+			bg:Destroy()
+			bv:Destroy()
+			humanoid.PlatformStand = false
+			player.Character.Animate.Disabled = false
+			tpwalking = false
+		end)
+	end
+end
+
+-- Fungsi untuk update kedua tombol toggle
+local function updateToggleButtons(isFlying)
+	local text = isFlying and "Fly ON" or "Fly OFF"
+	btns.Toggle.Text = text
+	minimizeBtns.ToggleMin.Text = text
+	
+	local gradientColor
+	if isFlying then
+		gradientColor = ColorSequence.new{
+			ColorSequenceKeypoint.new(0.0, Color3.fromRGB(231, 76, 60)),
+			ColorSequenceKeypoint.new(1.0, Color3.fromRGB(192, 57, 43))
+		}
+	else
+		gradientColor = ColorSequence.new{
+			ColorSequenceKeypoint.new(0.0, Color3.fromRGB(46, 204, 113)),
+			ColorSequenceKeypoint.new(1.0, Color3.fromRGB(22, 160, 133))
+		}
+	end
+	
+	local gradient1 = btns.Toggle:FindFirstChild("UIGradient")
+	local gradient2 = minimizeBtns.ToggleMin:FindFirstChild("UIGradient")
+	if gradient1 then gradient1.Color = gradientColor end
+	if gradient2 then gradient2.Color = gradientColor end
+end
+
+-- Toggle Fly Button (main frame)
+btns.Toggle.MouseButton1Click:Connect(function()
+	toggleFly()
+	updateToggleButtons(nowe)
+end)
+
+-- Toggle Fly Button (minimize frame)
+minimizeBtns.ToggleMin.MouseButton1Click:Connect(function()
+	toggleFly()
+	updateToggleButtons(nowe)
+end)
+
+-- Minimize Button
+btns.Minimize.MouseButton1Click:Connect(function()
+	minimizeGUI()
+end)
+
+-- Maximize Button
+minimizeBtns.Maximize.MouseButton1Click:Connect(function()
+	maximizeGUI()
+end)
+
+-- UP/DOWN Buttons dengan sistem dari script kedua
+local upConnection, downConnection
+
+btns.Up.MouseButton1Down:Connect(function()
+	upConnection = btns.Up.MouseEnter:Connect(function()
+		while upConnection do
+			wait()
+			hrp.CFrame = hrp.CFrame * CFrame.new(0,1,0)
+		end
+	end)
+end)
+
+btns.Up.MouseLeave:Connect(function()
+	if upConnection then
+		upConnection:Disconnect()
+		upConnection = nil
+	end
+end)
+
+btns.Down.MouseButton1Down:Connect(function()
+	downConnection = btns.Down.MouseEnter:Connect(function()
+		while downConnection do
+			wait()
+			hrp.CFrame = hrp.CFrame * CFrame.new(0,-1,0)
+		end
+	end)
+end)
+
+btns.Down.MouseLeave:Connect(function()
+	if downConnection then
+		downConnection:Disconnect()
+		downConnection = nil
+	end
+end)
+
+-- Speed Control
+btns.SpeedUp.MouseButton1Click:Connect(function()
+	speeds = speeds + 1
+	speedLabel.Text = "Speed: " .. speeds
+	if nowe == true then
+		tpwalking = false
+		for i = 1, speeds do
+			spawn(function()
+				local hb = RunService.Heartbeat	
+				tpwalking = true
+				local chr = player.Character
+				local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+				while tpwalking and hb:Wait() and chr and hum and hum.Parent do
+					if hum.MoveDirection.Magnitude > 0 then
+						chr:TranslateBy(hum.MoveDirection)
+					end
+				end
+			end)
+		end
+	end
+end)
+
+btns.SpeedDown.MouseButton1Click:Connect(function()
+	if speeds == 1 then
+		speedLabel.Text = "Speed: Cannot be less than 1"
+		wait(1)
+		speedLabel.Text = "Speed: " .. speeds
+	else
+		speeds = speeds - 1
+		speedLabel.Text = "Speed: " .. speeds
+		if nowe == true then
+			tpwalking = false
+			for i = 1, speeds do
+				spawn(function()
+					local hb = RunService.Heartbeat	
+					tpwalking = true
+					local chr = player.Character
+					local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+					while tpwalking and hb:Wait() and chr and hum and hum.Parent do
+						if hum.MoveDirection.Magnitude > 0 then
+							chr:TranslateBy(hum.MoveDirection)
+						end
+					end
+				end)
+			end
+		end
+	end
+end)
+
+-- Light Control
+btns.LightUp.MouseButton1Click:Connect(function()
+	lightBrightness = math.min(lightBrightness + 1, 10)
+	updateBodyLight()
+end)
+
+btns.LightDown.MouseButton1Click:Connect(function()
+	lightBrightness = math.max(lightBrightness - 1, 0)
+	updateBodyLight()
+end)
+
+-- Fungsi close yang bisa dipanggil dari kedua tombol
+local function closeScript()
+	nowe = false
+	tpwalking = false
+	
+	-- Cleanup
+	for _, child in pairs(hrp:GetChildren()) do
+		if child.Name == "FlashlightGlow" or child.Name == "FlashlightParticles" or child.Name == "FlashlightSpot" then
+			child:Destroy()
+		end
+	end
+	
+	humanoid.PlatformStand = false
+	player.Character.Animate.Disabled = false
+	
+	gui:Destroy()
+end
+
+-- Close Button (main frame)
+btns.Close.MouseButton1Click:Connect(closeScript)
+
+-- Close Button (minimize frame)
+minimizeBtns.CloseMin.MouseButton1Click:Connect(closeScript)
+
+-- Character respawn handler
+player.CharacterAdded:Connect(function(newChar)
+	wait(0.7)
+	char = newChar
+	hrp = char:WaitForChild("HumanoidRootPart")
+	humanoid = char:WaitForChild("Humanoid")
+	humanoid.PlatformStand = false
+	char.Animate.Disabled = false
+end)
+
+-- Notification
+game:GetService("StarterGui"):SetCore("SendNotification", { 
+	Title = "FLY GUI Minimal";
+	Text = "Script loaded successfully! Menu di sebelah kanan";
+	Duration = 3;
+})
